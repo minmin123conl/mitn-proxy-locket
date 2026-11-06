@@ -73,6 +73,102 @@ Mở `https://proxy.example.com/`:
 - **Bước 1**: Cài profile Đăng ký thiết bị (gửi UDID/IMEI, dùng 1 lần).
 - **Bước 2**: Cài profile DNS + CA (cấu hình DoH + Root CA; profile chính dùng hằng ngày).
 
+---
+
+## Deploy cụ thể: mindev.site (Cloudflare proxy / đám mây cam)
+
+Trường hợp `mindev.site` đang bật Cloudflare proxy (biểu tượng đám mây cam). Điều này hợp lệ cho **trang chủ / DoH / enroll callback** (có TLS miễn phí từ Cloudflare). NHƯNG lưu ý quan trọng:
+
+- **`PUBLIC_HOST`** = `mindev.site` (đã là giá trị mặc định trong `config.py`).
+- **`PUBLIC_IP`** = IP public **thật của VPS** (KHÔNG phải IP Cloudflare). DoH sẽ trả IP này cho các domain bị pin (`api.revenuecat.com`, `*.locketcamera.com`, firebase...). Vì vậy thiết bị gọi các domain đó **trực tiếp về VPS bằng SNI thật** — KHÔNG đi qua Cloudflare.
+- **Không cần** tạo A record trên Cloudflare cho các domain bị pin: chúng được resolve bằng chính DoH.
+
+### Cấu hình Cloudflare (dashboard)
+1. Record `mindev.site` (root): để **proxy cam** → Cloudflare cấp TLS, che IP VPS cho trang chủ/enroll/DoH.
+2. (Không bắt buộc) Tunnel thì bật HTTP/2; với proxy thông thường thì mặc định là đủ.
+
+### VPS — mở firewall
+```bash
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
+sudo ufw enable
+```
+
+### VPS — Caddy (TLS cho mindev.site + TLS on-demand cho domain bị pin)
+```bash
+sudo apt update && sudo apt install -y caddy
+```
+`/etc/caddy/Caddyfile`:
+```caddyfile
+# Trang chủ / DoH / enroll callback — qua Cloudflare proxy cam
+mindev.site {
+    reverse_proxy 127.0.0.1:8000
+}
+
+# TLS on-demand cho các domain bị pin (thiết bị gọi thẳng về VPS bằng SNI thật).
+# DoH trả PUBLIC_IP cho chúng, Caddy cấp cert tạm ngay lúc có request đầu tiên.
+{
+    on_demand_tls {
+        ask http://127.0.0.1:8000/healthz
+        interval 2m
+        burst 5
+    }
+    tls {
+        on_demand
+    }
+}
+```
+> Nếu iOS từ chối cert on-demand (ít gặp), hãy bỏ `ask`/tự cấp thủ công cert cho `api.revenuecat.com` và `api.locketcamera.com` bằng `caddy cert` hoặc đưa thẳng tên vào `tls`.
+
+Kiểm tra cấu hình:
+```bash
+sudo caddy validate --config /etc/caddy/Caddyfile
+sudo systemctl enable --now caddy
+```
+
+### VPS — chạy app
+```bash
+cd mitm-proxy
+source venv/bin/activate
+PUBLIC_HOST=mindev.site PUBLIC_IP=<IP_THỰC_CỦA_VPS> \
+  uvicorn main:app --host 127.0.0.1 --port 8000
+```
+> Nên chạy bằng systemd (xem bên dưới). `PUBLIC_IP` phải là IP public thật của VPS.
+
+### VPS — systemd service (chạy nền)
+`/etc/systemd/system/mitm-proxy.service`:
+```ini
+[Unit]
+Description=Locket Gold MITM proxy
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/mitm-proxy
+Environment=PUBLIC_HOST=mindev.site
+Environment=PUBLIC_IP=<IP_THỰC_CỦA_VPS>
+ExecStart=/opt/mitm-proxy/venv/bin/uvicorn main:app --host 127.0.0.1 --port 8000
+Restart=always
+User=root
+
+[Install]
+WantedBy=multi-user.target
+```
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now mitm-proxy
+sudo systemctl status mitm-proxy
+```
+
+### Kiểm thử sau khi deploy
+```bash
+# Trang chủ qua Cloudflare
+curl -s https://mindev.site/healthz | jq .
+
+# DoH: lần resolve api.revenuecat.com phải trả về IP thật VPS (PUBLIC_IP)
+curl -s "https://mindev.site/dns-query?name=api.revenuecat.com&type=A" | jq .Answer
+```
+Nếu `Answer.data` = IP VPS → đúng. Nếu trả về IP bên ngoài → chưa pin (kiểm tra PUBLIC_IP và PINNED_DOMAINS).
+
 ## Luồng hoạt động (iOS)
 1. iPhone cài profile DNS → mọi DNS query đi qua `doh_server.py` (DoH).
 2. DoH trả IP của server cho các domain bị pin (`api.revenuecat.com`, `firebaseremoteconfig`...), resolve thật cho phần còn lại.
