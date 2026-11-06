@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# CA & keys (tuyệt đối không đẩy lên repo)
+ca/
+*.key
+*.pem
+*.crt
+*.mobileconfig
+
+# Secrets
+.env
+.env.*
+!*.example
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Logs
+*.log
