@@ -5,9 +5,14 @@ from pathlib import Path
 BASE_DIR = Path(__file__).resolve().parent
 
 # ===== Cấu hình cơ bản =====
-# Domain công khai trỏ về server này (bắt buộc cấu hình đúng). Ví dụ: "proxy.example.com"
-PUBLIC_HOST = os.environ.get("PUBLIC_HOST", "locketgold.example.com")
-# IP công khai của server, dùng để DoH "pin" các domain Locket về proxy.
+# Domain công khai trỏ về server này (bắt buộc cấu hình đúng).
+# Với domain mindev.site (Cloudflare proxy / đám mây cam): để nguyên "mindev.site"
+# là đủ — Cloudflare cấp TLS cho trang chủ, DoH và enroll callback.
+PUBLIC_HOST = os.environ.get("PUBLIC_HOST", "mindev.site")
+# IP public thật của VPS (KHÔNG phải IP Cloudflare). DoH trả IP này cho các domain
+# bị pin (api.revenuecat.com, *.locketcamera.com, firebase...) để thiết bị gọi thẳng
+# về VPS bằng SNI thật. Nên truyền qua biến môi trường lúc chạy, ví dụ:
+#   PUBLIC_IP=<IP_VPS> uvicorn main:app ...
 PUBLIC_IP = os.environ.get("PUBLIC_IP", "127.0.0.1")
 
 # Với DoH: khi thiết bị hỏi các domain dưới đây, ta trả về IP của server này
